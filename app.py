@@ -1,5 +1,5 @@
 import cv2
-from flask import Flask, render_template, Response
+from flask import Flask, render_template, Response, request
 from ultralytics import YOLO
 
 # Initializes your web app
@@ -11,12 +11,7 @@ model = YOLO("yolov8n-seg.pt")
 # Start Webcam
 cap = cv2.VideoCapture(0)
 
-# frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-# frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-# Video Capture Setup
-# fourcc = cv2.VideoWriter_fourcc(*'XVID') # compression format
-# out = cv2.VideoWriter('output.avi',fourcc,15.0,(frame_width,frame_height))
+selected_object = "all"
 
 def generate_frames():
     # Loop
@@ -26,14 +21,32 @@ def generate_frames():
         if success:
 
             result = model.predict(frame,conf=0.3) # Minimum confidence 0.3
-            annotated_frame = result[0].plot(conf=False) # Remove confidence label
 
-            # Total Objects Count
-            count = len(result[0].boxes)
-            cv2.putText(annotated_frame,f"Count: {count}",(12,37),cv2.FONT_HERSHEY_SIMPLEX,0.9,(0, 255, 255),2)
+            annotated_frame = frame.copy()
+            count = 0
+            boxes = result[0].boxes
 
-            # Write each frame and save the video
-            # out.write(annotated_frame)
+            if boxes is not None:
+                filtered_indices = [] 
+                for i, box in enumerate(boxes):
+                    class_id = int(box.cls[0])
+                    name = model.names[class_id]
+
+                    if selected_object == "all" or name == selected_object:
+                        filtered_indices.append(i)
+                        count += 1
+
+                if len(filtered_indices) > 0:
+                    filtered_result = result[0][filtered_indices]
+                    annotated_frame = filtered_result.plot(conf=False)
+                else:
+                    annotated_frame = frame.copy()
+
+            cv2.putText(annotated_frame,f"Count: {count}",(10, 35),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 255, 255),
+            2)
 
             # Encode frames as JPEG
             ret, buffer = cv2.imencode('.jpg',annotated_frame)
@@ -53,6 +66,12 @@ def video():
     # Sends data (here: video frames) to browser
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route("/set_filter")
+def set_filter():
+    global selected_object
+    # Get the 'object' value, if not found use 'all'
+    selected_object = request.args.get("object","all")
+    return "OK"
 
 if __name__ == "__main__":
     app.run(debug=True)
